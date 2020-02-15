@@ -1,12 +1,14 @@
-package goimagemerge
+package main
 
 import (
+	"bytes"
 	"errors"
 	"image"
 	"image/color"
 	"image/draw"
 	"image/jpeg"
 	"image/png"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -26,6 +28,8 @@ const (
 // Grid holds the data for each grid
 type Grid struct {
 	ImageFilePath   string
+	ImageBytes      []byte
+	ImageType       string
 	BackgroundColor color.Color
 	OffsetX         int
 	OffsetY         int
@@ -83,16 +87,6 @@ func OptGridSizeFromNthImageSize(n int) func(*MergeImage) {
 	}
 }
 
-func (m *MergeImage) readGridImage(grid *Grid) (image.Image, error) {
-	imgPath := grid.ImageFilePath
-
-	if m.BaseDir != "" {
-		imgPath = path.Join(m.BaseDir, grid.ImageFilePath)
-	}
-
-	return m.ReadImageFile(imgPath)
-}
-
 func (m *MergeImage) readGridsImages() ([]image.Image, error) {
 	var images []image.Image
 
@@ -108,6 +102,48 @@ func (m *MergeImage) readGridsImages() ([]image.Image, error) {
 	return images, nil
 }
 
+func (m *MergeImage) readGridImage(grid *Grid) (image.Image, error) {
+	imgPath := grid.ImageFilePath
+
+	if m.BaseDir != "" {
+		imgPath = path.Join(m.BaseDir, grid.ImageFilePath)
+	}
+
+	if len(grid.ImageBytes) <= 0 {
+		return m.ReadImageFile(imgPath)
+	}
+
+	return decodeImages(bytesToBuf(grid.ImageBytes), grid.ImageType)
+}
+
+func bytesToBuf(imageIn []byte) (io.Reader) {
+	// handle bytes
+	buf := new(bytes.Buffer)
+	buf.Write(imageIn)
+
+	return buf
+}
+
+func decodeImages(imageIn io.Reader, imageType string) (image.Image, error) {
+	var img image.Image
+	var err error
+	switch imageType {
+	case "jpg":
+		fallthrough
+	case "jfif":
+		fallthrough
+	case "jpeg":
+		img, err = jpeg.Decode(imageIn)
+	case "png":
+		img, err = png.Decode(imageIn)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return img, err
+}
+
 func (m *MergeImage) ReadImageFile(path string) (image.Image, error) {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
@@ -119,21 +155,10 @@ func (m *MergeImage) ReadImageFile(path string) (image.Image, error) {
 		return nil, err
 	}
 
-	var img image.Image
 	splittedPath := strings.Split(path, ".")
 	ext := splittedPath[len(splittedPath)-1]
 
-	if ext == "jpg" || ext == "jpeg" {
-		img, err = jpeg.Decode(imgFile)
-	} else {
-		img, err = png.Decode(imgFile)
-	}
-
-	if err != nil {
-		return nil, err
-	}
-
-	return img, nil
+	return decodeImages(imgFile, ext)
 }
 
 func (m *MergeImage) mergeGrids(images []image.Image) (*image.RGBA, error) {
